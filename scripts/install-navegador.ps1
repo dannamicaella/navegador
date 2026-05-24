@@ -1,0 +1,445 @@
+param(
+    [string]$SkillSourcePath,
+    [string]$SkillUrl = "https://raw.githubusercontent.com/giovannefeitosa/navegador/main/skills/navegador/SKILL.md"
+)
+
+$ErrorActionPreference = "Stop"
+
+$beginMarker = "# >>> navegador >>>"
+$endMarker = "# <<< navegador <<<"
+
+function Refresh-ProcessPath {
+    $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $joined = @($machinePath, $userPath) | Where-Object { $_ } | Select-Object -Unique
+    if ($joined.Count -gt 0) {
+        $env:Path = ($joined -join ";")
+    }
+}
+
+function Find-Command {
+    param(
+        [string[]]$Names
+    )
+
+    foreach ($name in $Names) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue
+        if ($command) {
+            return $command
+        }
+    }
+
+    return $null
+}
+
+function Ensure-Winget {
+    $winget = Find-Command -Names @("winget.exe", "winget")
+    if (-not $winget) {
+        throw "winget nao esta disponivel nesta maquina. Instale manualmente o Node.js LTS e o Google Chrome, ou rode este instalador em um Windows 11 com winget."
+    }
+
+    return $winget
+}
+
+function Install-WingetPackage {
+    param(
+        [string]$Id
+    )
+
+    $null = Ensure-Winget
+    & winget.exe install --id $Id --exact --accept-package-agreements --accept-source-agreements --silent
+    Refresh-ProcessPath
+}
+
+function Get-RealChromePath {
+    $chromePaths = @(
+        "$env:PROGRAMFILES\Google\Chrome\Application\chrome.exe",
+        "${env:PROGRAMFILES(x86)}\Google\Chrome\Application\chrome.exe",
+        "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+    )
+
+    return $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+
+function Resolve-SkillContent {
+    param(
+        [string]$RequestedPath,
+        [string]$RequestedUrl
+    )
+
+    $localCandidates = @()
+    if ($RequestedPath) {
+        $localCandidates += $RequestedPath
+    }
+
+    foreach ($candidate in $localCandidates) {
+        if ($candidate -and (Test-Path $candidate)) {
+            return (Get-Content -Path $candidate -Raw)
+        }
+    }
+
+    $response = Invoke-WebRequest -Uri $RequestedUrl -UseBasicParsing
+    if ($response.StatusCode -ne 200 -or [string]::IsNullOrWhiteSpace($response.Content)) {
+        throw "Nao foi possivel obter o arquivo SKILL.md em $RequestedUrl."
+    }
+
+    return $response.Content
+}
+
+function Install-SkillIfBaseExists {
+    param(
+        [string]$BaseDir,
+        [string]$SkillContent
+    )
+
+    if (-not (Test-Path $BaseDir)) {
+        return $false
+    }
+
+    $skillDir = Join-Path $BaseDir "navegador"
+    New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+    Set-Content -Path (Join-Path $skillDir "SKILL.md") -Value $SkillContent -Encoding UTF8
+    return $true
+}
+
+function Stop-AgentBrowserDaemon {
+    param(
+        $Command
+    )
+
+    if (-not $Command) {
+        return
+    }
+
+    try {
+        & $Command.Source close 2>$null | Out-Null
+    } catch {
+    }
+}
+
+function Convert-WinPathToMnt {
+    param(
+        [string]$Path
+    )
+
+    $drive = $Path.Substring(0, 1).ToLower()
+    $rest = $Path.Substring(2) -replace "\\", "/"
+    return "/mnt/$drive$rest"
+}
+
+$report = [ordered]@{
+    nodeVersion          = $null
+    npmVersion           = $null
+    agentBrowserVersion  = $null
+    chromeUsed           = $null
+    profilePath          = $PROFILE
+    profileCreated       = $false
+    executionPolicy      = $null
+    windowsSkillTargets  = @()
+    wslDistros           = @()
+    wslStatus            = $null
+}
+
+Write-Host "==> Verificando Node.js e npm"
+Refresh-ProcessPath
+$nodeCommand = Find-Command -Names @("node", "node.exe")
+$npmCommand = Find-Command -Names @("npm", "npm.cmd", "npm.exe")
+
+if (-not $nodeCommand -or -not $npmCommand) {
+    Write-Host "Node.js/npm nao encontrados. Tentando instalar via winget..."
+    Install-WingetPackage -Id "OpenJS.NodeJS.LTS"
+    $nodeJsDir = Join-Path $env:ProgramFiles "nodejs"
+    if ((Test-Path $nodeJsDir) -and $env:Path -notlike "*$nodeJsDir*") {
+        $env:Path = "$nodeJsDir;$env:Path"
+    }
+    $nodeCommand = Find-Command -Names @("node", "node.exe")
+    $npmCommand = Find-Command -Names @("npm", "npm.cmd", "npm.exe")
+}
+
+if (-not $nodeCommand -or -not $npmCommand) {
+    throw "Nao foi possivel localizar Node.js/npm mesmo apos a tentativa de instalacao automatica."
+}
+
+$report.nodeVersion = (& $nodeCommand.Source --version).Trim()
+$report.npmVersion = (& $npmCommand.Source --version).Trim()
+
+Write-Host "==> Instalando/atualizando agent-browser"
+if ($agentBrowserBefore = Find-Command -Names @("agent-browser", "agent-browser.cmd", "agent-browser.ps1")) {
+    Stop-AgentBrowserDaemon -Command $agentBrowserBefore
+}
+& $npmCommand.Source install -g agent-browser
+Refresh-ProcessPath
+if ((Test-Path (Join-Path $env:APPDATA "npm")) -and $env:Path -notlike "*$env:APPDATA\npm*") {
+    $env:Path = "$env:APPDATA\npm;$env:Path"
+}
+
+$agentBrowserCommand = Find-Command -Names @("agent-browser", "agent-browser.cmd", "agent-browser.ps1")
+if (-not $agentBrowserCommand) {
+    throw "O comando agent-browser nao ficou disponivel apos a instalacao."
+}
+$npmPrefix = (& $npmCommand.Source config get prefix).Trim()
+$agentBrowserExe = Join-Path $npmPrefix "node_modules\agent-browser\bin\agent-browser-win32-x64.exe"
+if (-not (Test-Path $agentBrowserExe)) {
+    throw "Nao foi possivel localizar o executavel do agent-browser em $agentBrowserExe."
+}
+
+$report.agentBrowserVersion = (& $agentBrowserCommand.Source --version).Trim()
+
+Write-Host "==> Verificando Google Chrome"
+$chromeReal = Get-RealChromePath
+if (-not $chromeReal) {
+    try {
+        Write-Host "Google Chrome nao encontrado. Tentando instalar via winget..."
+        Install-WingetPackage -Id "Google.Chrome"
+        $chromeReal = Get-RealChromePath
+    } catch {
+        Write-Warning "Falha ao instalar Google Chrome via winget: $($_.Exception.Message)"
+    }
+}
+
+if ($chromeReal) {
+    $report.chromeUsed = $chromeReal
+} else {
+    Write-Warning "Chrome real nao encontrado. Instalando Chrome for Testing como fallback..."
+    & $agentBrowserCommand.Source install
+    $report.chromeUsed = "Chrome for Testing (fallback via agent-browser install)"
+}
+
+Write-Host "==> Atualizando funcao navegador no PowerShell"
+$profileDir = Split-Path -Parent $PROFILE
+if (-not (Test-Path $profileDir)) {
+    New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+}
+if (-not (Test-Path $PROFILE)) {
+    New-Item -ItemType File -Path $PROFILE -Force | Out-Null
+    $report.profileCreated = $true
+}
+
+$policyBefore = Get-ExecutionPolicy -Scope CurrentUser
+if ($policyBefore -in @("Restricted", "Undefined", "AllSigned")) {
+    Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+    $report.executionPolicy = "$policyBefore -> RemoteSigned"
+} else {
+    $report.executionPolicy = "$policyBefore -> $policyBefore"
+}
+
+$block = @"
+$beginMarker
+function navegador {
+    param(
+        [Parameter(ValueFromRemainingArguments = `$true)]
+        [string[]] `$Argumentos
+    )
+
+    `$chromePaths = @(
+        "`$env:PROGRAMFILES\Google\Chrome\Application\chrome.exe",
+        "`${env:PROGRAMFILES(x86)}\Google\Chrome\Application\chrome.exe",
+        "`$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+    )
+    `$chromeExe = `$chromePaths | Where-Object { Test-Path `$_ } | Select-Object -First 1
+
+    if (`$chromeExe) {
+        agent-browser --profile "`$env:USERPROFILE\Navegador" --headed --executable-path `$chromeExe --args "--disable-blink-features=AutomationControlled" @Argumentos
+    } else {
+        agent-browser --profile "`$env:USERPROFILE\Navegador" --headed --args "--disable-blink-features=AutomationControlled" @Argumentos
+    }
+}
+$endMarker
+"@
+
+$profileContent = if (Test-Path $PROFILE) { Get-Content -Path $PROFILE -Raw } else { "" }
+if ($profileContent -match "(?ms)$([regex]::Escape($beginMarker)).*?$([regex]::Escape($endMarker))") {
+    $escapedBlock = $block -replace "\$", '$$$$'
+    $newContent = [regex]::Replace(
+        $profileContent,
+        "(?ms)$([regex]::Escape($beginMarker)).*?$([regex]::Escape($endMarker))",
+        $escapedBlock
+    )
+    Set-Content -Path $PROFILE -Value $newContent -Encoding UTF8
+} else {
+    Add-Content -Path $PROFILE -Value "`r`n$block`r`n" -Encoding UTF8
+}
+
+Stop-AgentBrowserDaemon -Command $agentBrowserCommand
+. $PROFILE
+
+$navegadorCommand = Get-Command navegador -ErrorAction SilentlyContinue
+if (-not $navegadorCommand) {
+    throw "A funcao navegador nao ficou disponivel apos carregar o `$PROFILE."
+}
+if ($navegadorCommand.Definition -notmatch "--executable-path" -or $navegadorCommand.Definition -notmatch "--disable-blink-features=AutomationControlled") {
+    throw "A definicao da funcao navegador nao contem as flags esperadas."
+}
+
+Write-Host "==> Registrando a skill globalmente no Windows"
+$skillContent = Resolve-SkillContent -RequestedPath $SkillSourcePath -RequestedUrl $SkillUrl
+$codexSkills = Join-Path $env:USERPROFILE ".codex\skills"
+$claudeSkills = Join-Path $env:USERPROFILE ".claude\skills"
+$hasWindowsClient = $false
+
+if (Install-SkillIfBaseExists -BaseDir $codexSkills -SkillContent $skillContent) {
+    $report.windowsSkillTargets += (Join-Path $codexSkills "navegador\SKILL.md")
+    $hasWindowsClient = $true
+}
+if (Install-SkillIfBaseExists -BaseDir $claudeSkills -SkillContent $skillContent) {
+    $report.windowsSkillTargets += (Join-Path $claudeSkills "navegador\SKILL.md")
+    $hasWindowsClient = $true
+}
+
+if (-not $hasWindowsClient) {
+    Write-Warning "Nenhum diretorio global de skills foi encontrado no Windows. Se o cliente de IA estiver rodando dentro de WSL/Linux, rode tambem o instalador bash deste repositorio."
+}
+
+Write-Host "==> Integrando com WSL2 (quando aplicavel)"
+$wslDistrosOk = @()
+$wslMotivoIgnorado = $null
+$wslAvailable = $false
+$wslWorkdir = $env:USERPROFILE
+Push-Location $wslWorkdir
+try {
+    try {
+        $null = wsl --status 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $wslAvailable = $true
+        }
+    } catch {
+    }
+
+    if (-not $wslAvailable) {
+        $wslMotivoIgnorado = "WSL2 nao detectado neste computador."
+    } else {
+        $encBefore = [Console]::OutputEncoding
+        [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
+        try {
+            $distros = (wsl -l -q) -split "`r?`n" |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { $_ -and $_ -notmatch "^\s*$" }
+        } finally {
+            [Console]::OutputEncoding = $encBefore
+        }
+
+        foreach ($distro in $distros) {
+            $distroVersion = (wsl -d $distro -- sh -lc "lsb_release -rs 2>/dev/null" 2>$null) -as [string]
+            $distroVersion = ($distroVersion -replace "\s", "")
+            $distroId = (wsl -d $distro -- sh -lc "lsb_release -is 2>/dev/null" 2>$null) -as [string]
+            $distroId = ($distroId -replace "\s", "")
+            if ($distroId -ieq "Ubuntu" -and $distroVersion -match "^\d+(\.\d+)?$") {
+                if ([int]([double]$distroVersion) -ge 24) {
+                    $wslDistrosOk += $distro
+                }
+            }
+        }
+
+        if ($wslDistrosOk.Count -eq 0) {
+            $wslMotivoIgnorado = "WSL2 detectado, mas nenhuma distro e Ubuntu 24+."
+        }
+    }
+
+    if ($wslDistrosOk.Count -gt 0) {
+        $agentBrowserExeLinux = Convert-WinPathToMnt -Path $agentBrowserExe
+        $profileWin = Join-Path $env:USERPROFILE "Navegador"
+        $chromeWin = if ($chromeReal) { $chromeReal } else { "" }
+        $wslWrapper = @'
+#!/usr/bin/env bash
+set -euo pipefail
+
+AGENT_BROWSER_EXE='__AGENT_BROWSER_EXE__'
+PROFILE_WIN='__PROFILE_WIN__'
+CHROME_WIN='__CHROME_WIN__'
+
+if [ -n "$CHROME_WIN" ]; then
+    "$AGENT_BROWSER_EXE" --profile "$PROFILE_WIN" --headed --executable-path "$CHROME_WIN" --args "--disable-blink-features=AutomationControlled" "$@"
+else
+    "$AGENT_BROWSER_EXE" --profile "$PROFILE_WIN" --headed --args "--disable-blink-features=AutomationControlled" "$@"
+fi
+'@
+        $wslWrapper = $wslWrapper.Replace("__AGENT_BROWSER_EXE__", $agentBrowserExeLinux)
+        $wslWrapper = $wslWrapper.Replace("__PROFILE_WIN__", $profileWin)
+        $wslWrapper = $wslWrapper.Replace("__CHROME_WIN__", $chromeWin)
+
+    $tmpWrapperWin = Join-Path $env:TEMP "navegador-wsl-wrapper.sh"
+    [System.IO.File]::WriteAllText(
+        $tmpWrapperWin,
+        ($wslWrapper -replace "`r`n", "`n"),
+        (New-Object System.Text.UTF8Encoding($false))
+    )
+
+    $tmpWrapperLinux = Convert-WinPathToMnt -Path $tmpWrapperWin
+    $installer = @'
+#!/usr/bin/env bash
+set -euo pipefail
+BEGIN_MARK='# >>> navegador >>>'
+END_MARK='# <<< navegador <<<'
+LOCAL_BIN="$HOME/.local/bin"
+TARGET="$LOCAL_BIN/navegador"
+WRAPPER_SOURCE="__WRAPPER__"
+BASHRC="$HOME/.bashrc"
+
+mkdir -p "$LOCAL_BIN"
+cp "$WRAPPER_SOURCE" "$TARGET"
+chmod 755 "$TARGET"
+
+if [ -f "$BASHRC" ] && grep -qF "$BEGIN_MARK" "$BASHRC"; then
+    awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
+        index($0,b)==1 {skip=1; next}
+        skip && index($0,e)==1 {skip=0; next}
+        !skip {print}
+    ' "$BASHRC" > "$BASHRC.tmp" && mv "$BASHRC.tmp" "$BASHRC"
+fi
+
+'@
+    $installer = $installer.Replace("__WRAPPER__", $tmpWrapperLinux)
+
+    $tmpInstallerWin = Join-Path $env:TEMP "navegador-bashrc-install.sh"
+    [System.IO.File]::WriteAllText(
+        $tmpInstallerWin,
+        ($installer -replace "`r`n", "`n"),
+        (New-Object System.Text.UTF8Encoding($false))
+    )
+    $tmpInstallerLinux = Convert-WinPathToMnt -Path $tmpInstallerWin
+
+    try {
+        foreach ($distro in $wslDistrosOk) {
+            wsl -d $distro -- bash "$tmpInstallerLinux"
+            if ($LASTEXITCODE -eq 0) {
+                $report.wslDistros += $distro
+            }
+        }
+    } finally {
+        Remove-Item -Path $tmpWrapperWin, $tmpInstallerWin -ErrorAction SilentlyContinue
+    }
+
+    foreach ($distro in $wslDistrosOk) {
+        $commandOutput = (wsl -d $distro -- sh -lc "command -v navegador 2>/dev/null" 2>$null) -as [string]
+        $commandOutput = ($commandOutput -replace "\s", "")
+        if ([string]::IsNullOrWhiteSpace($commandOutput) -or $commandOutput -notmatch "/navegador$") {
+            Write-Warning "navegador nao ficou disponivel na distro '$distro'."
+        }
+    }
+
+        $report.wslStatus = "Integrado em: $($report.wslDistros -join ', ')"
+    } else {
+        $report.wslStatus = $wslMotivoIgnorado
+    }
+} finally {
+    Pop-Location
+}
+
+Write-Host ""
+Write-Host "=== Relatorio de instalacao - skill navegador ==="
+Write-Host "Node.js: $($report.nodeVersion)"
+Write-Host "npm: $($report.npmVersion)"
+Write-Host "agent-browser: $($report.agentBrowserVersion)"
+Write-Host "Chrome usado: $($report.chromeUsed)"
+Write-Host "PROFILE: $($report.profilePath)"
+Write-Host "PROFILE criado agora: $($report.profileCreated)"
+Write-Host "ExecutionPolicy: $($report.executionPolicy)"
+if ($report.windowsSkillTargets.Count -gt 0) {
+    Write-Host "Skills registradas no Windows:"
+    $report.windowsSkillTargets | ForEach-Object { Write-Host " - $_" }
+} else {
+    Write-Host "Skills registradas no Windows: nenhuma"
+}
+Write-Host "WSL2: $($report.wslStatus)"
+Write-Host ""
+Write-Host "Reinicie completamente o Codex e/ou Claude Code para carregar a skill global."
