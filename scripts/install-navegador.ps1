@@ -127,6 +127,100 @@ function Convert-WinPathToMnt {
     return "/mnt/$drive$rest"
 }
 
+function Set-Shortcut {
+    param(
+        [string]$ShortcutPath,
+        [string]$TargetPath,
+        [string]$Arguments,
+        [string]$WorkingDirectory,
+        [string]$IconLocation,
+        [string]$Description
+    )
+
+    $shortcutDir = Split-Path -Parent $ShortcutPath
+    if ($shortcutDir -and -not (Test-Path $shortcutDir)) {
+        New-Item -ItemType Directory -Path $shortcutDir -Force | Out-Null
+    }
+
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($ShortcutPath)
+    $shortcut.TargetPath = $TargetPath
+    $shortcut.Arguments = $Arguments
+    $shortcut.WorkingDirectory = $WorkingDirectory
+    $shortcut.IconLocation = $IconLocation
+    $shortcut.Description = $Description
+    $shortcut.Save()
+}
+
+function Get-NavegadorShortcutArguments {
+    param(
+        [string]$ChromePath
+    )
+
+    $profilePath = Join-Path $env:USERPROFILE "Navegador"
+    $arguments = @(
+        '--profile'
+        ('"{0}"' -f $profilePath)
+        '--headed'
+    )
+
+    if ($ChromePath) {
+        $arguments += @(
+            '--executable-path'
+            ('"{0}"' -f $ChromePath)
+        )
+    }
+
+    $arguments += @(
+        '--args'
+        '"--disable-blink-features=AutomationControlled"'
+        'open'
+        'about:blank'
+    )
+
+    return ($arguments -join ' ')
+}
+
+function Install-NavegadorShortcuts {
+    param(
+        [string]$AgentBrowserExe,
+        [string]$ChromePath,
+        $Report
+    )
+
+    $shortcutName = "Navegador.lnk"
+    $desktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) $shortcutName
+    $taskbarDir = Join-Path $env:APPDATA "Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
+    $taskbarShortcut = Join-Path $taskbarDir $shortcutName
+    $arguments = Get-NavegadorShortcutArguments -ChromePath $ChromePath
+    $iconLocation = $AgentBrowserExe
+    $description = "Abre o Navegador com o perfil persistente do Windows."
+
+    Set-Shortcut `
+        -ShortcutPath $desktopShortcut `
+        -TargetPath $AgentBrowserExe `
+        -Arguments $arguments `
+        -WorkingDirectory $env:USERPROFILE `
+        -IconLocation $iconLocation `
+        -Description $description
+
+    if (Test-Path $desktopShortcut) {
+        $Report.desktopShortcutPath = $desktopShortcut
+    }
+
+    Set-Shortcut `
+        -ShortcutPath $taskbarShortcut `
+        -TargetPath $AgentBrowserExe `
+        -Arguments $arguments `
+        -WorkingDirectory $env:USERPROFILE `
+        -IconLocation $iconLocation `
+        -Description $description
+
+    if (Test-Path $taskbarShortcut) {
+        $Report.taskbarShortcutPath = $taskbarShortcut
+    }
+}
+
 $report = [ordered]@{
     nodeVersion          = $null
     npmVersion           = $null
@@ -135,6 +229,8 @@ $report = [ordered]@{
     profilePath          = $PROFILE
     profileCreated       = $false
     executionPolicy      = $null
+    desktopShortcutPath  = $null
+    taskbarShortcutPath  = $null
     windowsSkillTargets  = @()
     wslSkillTargets      = @()
     wslDistros           = @()
@@ -452,6 +548,9 @@ if ($report.windowsSkillTargets.Count -eq 0 -and $report.wslSkillTargets.Count -
     Write-Warning "Nenhum diretorio global de skills do Codex ou Claude Code foi encontrado no Windows ou nas distros WSL integradas."
 }
 
+Write-Host "==> Criando atalhos no Windows"
+Install-NavegadorShortcuts -AgentBrowserExe $agentBrowserExe -ChromePath $chromeReal -Report $report
+
 Write-Host ""
 Write-Host "=== Relatorio de instalacao - skill navegador ==="
 Write-Host "Node.js: $($report.nodeVersion)"
@@ -461,6 +560,8 @@ Write-Host "Chrome usado: $($report.chromeUsed)"
 Write-Host "PROFILE: $($report.profilePath)"
 Write-Host "PROFILE criado agora: $($report.profileCreated)"
 Write-Host "ExecutionPolicy: $($report.executionPolicy)"
+Write-Host "Atalho na area de trabalho: $(if ($report.desktopShortcutPath) { $report.desktopShortcutPath } else { 'nao criado' })"
+Write-Host "Atalho na taskbar: $(if ($report.taskbarShortcutPath) { $report.taskbarShortcutPath } else { 'nao criado' })"
 if ($report.windowsSkillTargets.Count -gt 0) {
     Write-Host "Skills registradas no Windows:"
     $report.windowsSkillTargets | ForEach-Object { Write-Host " - $_" }
