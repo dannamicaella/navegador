@@ -1,5 +1,7 @@
 Configure a skill Navegador neste computador.
 
+O unico caminho suportado de instalacao e pelo PowerShell do Windows. Se houver WSL2 Ubuntu 24+, a mesma instalacao deve deixar o comando e a skill funcionando la tambem, sem exigir um segundo instalador em bash.
+
 ## Guardrails
 
 - Se o PowerShell não estiver disponível, pare e avise que este prompt só pode rodar em Claude Code ou OpenAI Codex com acesso ao terminal.
@@ -234,7 +236,7 @@ $hasClaude = Test-Path $claudeSkills
 
 Se `CodexInstalado` e `ClaudeInstalado` forem ambos `False`, pare e explique que o computador precisa ter Codex ou Claude Code instalado antes de registrar a skill globalmente.
 
-Também confira se o ambiente Unix atual tem diretórios globais como `~/.codex/skills` e `~/.claude/skills`. Isso cobre casos em que o Codex roda dentro de WSL/Linux. Não assuma que o único cliente está em `%USERPROFILE%` do Windows.
+Se ambos forem `False`, nao pare ainda. O cliente pode estar rodando apenas dentro do WSL, e a verificacao/registro dos diretorios Linux deve acontecer mais adiante pelo proprio PowerShell via `wsl`.
 
 ### 5.2 Baixar a skill
 
@@ -285,19 +287,7 @@ if ($hasClaude) {
 }
 ```
 
-Se o ambiente atual também tiver clientes Unix/WSL, grave a mesma skill nos diretórios globais locais:
-
-```bash
-skill_url="https://raw.githubusercontent.com/giovannefeitosa/navegador/main/skills/navegador/SKILL.md"
-for base in "$HOME/.codex/skills" "$HOME/.claude/skills"; do
-  if [ -d "$base" ]; then
-    mkdir -p "$base/navegador"
-    curl -fsSL "$skill_url" -o "$base/navegador/SKILL.md"
-  fi
-done
-```
-
-Ignore diretórios Unix que não existirem.
+Nao rode um segundo instalador em bash. Se houver clientes Unix/WSL, a mesma sessao PowerShell deve registrar a skill neles durante a etapa de integracao com WSL.
 
 ### 5.4 Verificar registro global
 
@@ -308,18 +298,15 @@ Get-Content "$env:USERPROFILE\.codex\skills\navegador\SKILL.md" -ErrorAction Sil
 Get-Content "$env:USERPROFILE\.claude\skills\navegador\SKILL.md" -ErrorAction SilentlyContinue | Select-Object -First 5
 ```
 
-Em clientes Unix/WSL, rode:
-
-```bash
-test -f "$HOME/.codex/skills/navegador/SKILL.md" && sed -n '1,5p' "$HOME/.codex/skills/navegador/SKILL.md"
-test -f "$HOME/.claude/skills/navegador/SKILL.md" && sed -n '1,5p' "$HOME/.claude/skills/navegador/SKILL.md"
-```
-
-Se apenas um cliente estiver instalado, é normal que o outro comando não retorne nada.
+Se apenas um cliente estiver instalado no Windows, e normal que o outro comando nao retorne nada.
 
 ## 6. Integrar com WSL2, se existir
 
-Se o computador tiver WSL2 com pelo menos uma distro Ubuntu 24+, instale um executável `navegador` em `~/.local/bin` de cada uma. O wrapper em bash chama diretamente o executável Windows do `agent-browser` com o mesmo perfil e as mesmas flags definidas para o PowerShell.
+Se o computador tiver WSL2 com pelo menos uma distro Ubuntu 24+, a mesma instalacao PowerShell deve:
+
+- instalar um executavel `navegador` em `~/.local/bin` de cada distro suportada;
+- registrar `SKILL.md` em `~/.codex/skills/navegador` e `~/.claude/skills/navegador` quando esses diretorios existirem;
+- chamar diretamente o executavel Windows do `agent-browser` com o mesmo perfil e as mesmas flags definidas para o PowerShell.
 
 Se não houver WSL2, ou se nenhuma distro for Ubuntu 24+, ignore este passo e registre o motivo no relatório final. Nunca interrompa a instalação por causa do WSL2.
 
@@ -449,6 +436,7 @@ LOCAL_BIN="$HOME/.local/bin"
 TARGET="$LOCAL_BIN/navegador"
 WRAPPER_SOURCE="__WRAPPER__"
 BASHRC="$HOME/.bashrc"
+SKILL_SOURCE="__SKILL__"
 
 mkdir -p "$LOCAL_BIN"
 cp "$WRAPPER_SOURCE" "$TARGET"
@@ -468,8 +456,16 @@ fi
 if [ -f "$BASHRC" ]; then
     sed -i -E '/^EOF[[:space:]]*$/d' "$BASHRC"
 fi
+
+for base in "$HOME/.codex/skills" "$HOME/.claude/skills"; do
+    if [ -d "$base" ]; then
+        mkdir -p "$base/navegador"
+        cp "$SKILL_SOURCE" "$base/navegador/SKILL.md"
+    fi
+done
 '@
     $instalador = $instalador.Replace('__WRAPPER__', $tmpWrapperLinux)
+    $instalador = $instalador.Replace('__SKILL__', $tmpSkillLinux)
 
     $tmpInstaladorWin = Join-Path $env:TEMP "navegador-bashrc-install.sh"
     [System.IO.File]::WriteAllText(
@@ -511,7 +507,16 @@ foreach ($distro in $wslDistrosOk) {
 Pop-Location
 ```
 
-Se a escrita do wrapper ou a verificação falhar em alguma distro, registre o motivo no relatório final e continue. A skill do Windows ainda funciona.
+Verifique tambem se a skill foi registrada quando houver cliente Linux:
+
+```powershell
+foreach ($distro in $wslDistrosOk) {
+    wsl -d $distro -- sh -lc 'test -f "$HOME/.codex/skills/navegador/SKILL.md" && sed -n "1,5p" "$HOME/.codex/skills/navegador/SKILL.md"'
+    wsl -d $distro -- sh -lc 'test -f "$HOME/.claude/skills/navegador/SKILL.md" && sed -n "1,5p" "$HOME/.claude/skills/navegador/SKILL.md"'
+}
+```
+
+Se a escrita do wrapper ou o registro/verificacao da skill falhar em alguma distro, registre o motivo no relatorio final e continue. A skill do Windows ainda funciona.
 
 ## 7. Reiniciar o cliente de IA
 

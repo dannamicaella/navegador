@@ -12,7 +12,8 @@ A instalação cria um perfil persistente em `%USERPROFILE%\Navegador`. Logins, 
 - O instalador cria a função `navegador` no `$PROFILE` do PowerShell.
 - `agent-browser` é instalado globalmente no Windows com `npm install -g`.
 - `Node.js`, `npm`, `agent-browser` e Google Chrome podem ser instalados automaticamente quando `winget` estiver disponível.
-- WSL2 é opcional. Se existir uma ou mais distros Ubuntu 24+, o instalador cria um executável `navegador` em `~/.local/bin` de cada uma e remove wrappers antigos do `.bashrc`. Outras distros são ignoradas.
+- A instalação sempre começa no PowerShell do Windows.
+- WSL2 é opcional. Se existir uma ou mais distros Ubuntu 24+, o mesmo instalador PowerShell cria um executável `navegador` em `~/.local/bin` de cada uma, remove wrappers antigos do `.bashrc` e registra a skill nos diretórios Linux do Codex/Claude quando eles existirem. Outras distros são ignoradas.
 - Se Codex e Claude Code estiverem instalados, a skill é registrada nos dois.
 - A skill é instalada com escopo global e pode ser usada em qualquer projeto.
 
@@ -26,7 +27,7 @@ A instalação cria um perfil persistente em `%USERPROFILE%\Navegador`. Logins, 
 
 ## Instalação rápida
 
-Rode no PowerShell do Windows. O script faz instalação nova e também atualiza instalações antigas.
+Rode no PowerShell do Windows. Esse é o unico caminho suportado para instalar. O script faz instalacao nova e tambem atualiza instalacoes antigas.
 
 ```powershell
 $tmp = Join-Path $env:TEMP "install-navegador.ps1"
@@ -39,9 +40,9 @@ finally {
 }
 ```
 
-Depois da instalação, feche e abra novamente o Codex ou o Claude Code para carregar a skill global.
+Depois da instalacao, feche e abra novamente o Codex ou o Claude Code para carregar a skill global.
 
-> Peça para o seu agente instalar manualmente, veja [INSTALL_PROMPT.md](INSTALL_PROMPT.md). Esse caminho é referência; o script acima é o caminho recomendado.
+> Peca para o seu agente instalar manualmente, veja [INSTALL_PROMPT.md](INSTALL_PROMPT.md). Esse caminho e referencia; o script acima e o caminho recomendado.
 
 ## Como testar
 

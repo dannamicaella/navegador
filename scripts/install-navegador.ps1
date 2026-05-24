@@ -136,6 +136,7 @@ $report = [ordered]@{
     profileCreated       = $false
     executionPolicy      = $null
     windowsSkillTargets  = @()
+    wslSkillTargets      = @()
     wslDistros           = @()
     wslStatus            = $null
 }
@@ -287,7 +288,7 @@ if (Install-SkillIfBaseExists -BaseDir $claudeSkills -SkillContent $skillContent
 }
 
 if (-not $hasWindowsClient) {
-    Write-Warning "Nenhum diretorio global de skills foi encontrado no Windows. Se o cliente de IA estiver rodando dentro de WSL/Linux, rode tambem o instalador bash deste repositorio."
+    Write-Warning "Nenhum diretorio global de skills foi encontrado no Windows. Vou continuar e tentar registrar a skill nas distros WSL suportadas, se existirem."
 }
 
 Write-Host "==> Integrando com WSL2 (quando aplicavel)"
@@ -356,16 +357,23 @@ fi
         $wslWrapper = $wslWrapper.Replace("__AGENT_BROWSER_EXE__", $agentBrowserExeLinux)
         $wslWrapper = $wslWrapper.Replace("__PROFILE_WIN__", $profileWin)
         $wslWrapper = $wslWrapper.Replace("__CHROME_WIN__", $chromeWin)
+        $tmpSkillWin = Join-Path $env:TEMP "navegador-skill.md"
+        [System.IO.File]::WriteAllText(
+            $tmpSkillWin,
+            ($skillContent -replace "`r`n", "`n"),
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+        $tmpSkillLinux = Convert-WinPathToMnt -Path $tmpSkillWin
 
-    $tmpWrapperWin = Join-Path $env:TEMP "navegador-wsl-wrapper.sh"
-    [System.IO.File]::WriteAllText(
-        $tmpWrapperWin,
-        ($wslWrapper -replace "`r`n", "`n"),
-        (New-Object System.Text.UTF8Encoding($false))
-    )
+        $tmpWrapperWin = Join-Path $env:TEMP "navegador-wsl-wrapper.sh"
+        [System.IO.File]::WriteAllText(
+            $tmpWrapperWin,
+            ($wslWrapper -replace "`r`n", "`n"),
+            (New-Object System.Text.UTF8Encoding($false))
+        )
 
-    $tmpWrapperLinux = Convert-WinPathToMnt -Path $tmpWrapperWin
-    $installer = @'
+        $tmpWrapperLinux = Convert-WinPathToMnt -Path $tmpWrapperWin
+        $installer = @'
 #!/usr/bin/env bash
 set -euo pipefail
 BEGIN_MARK='# >>> navegador >>>'
@@ -373,6 +381,7 @@ END_MARK='# <<< navegador <<<'
 LOCAL_BIN="$HOME/.local/bin"
 TARGET="$LOCAL_BIN/navegador"
 WRAPPER_SOURCE="__WRAPPER__"
+SKILL_SOURCE="__SKILL__"
 BASHRC="$HOME/.bashrc"
 
 mkdir -p "$LOCAL_BIN"
@@ -387,35 +396,49 @@ if [ -f "$BASHRC" ] && grep -qF "$BEGIN_MARK" "$BASHRC"; then
     ' "$BASHRC" > "$BASHRC.tmp" && mv "$BASHRC.tmp" "$BASHRC"
 fi
 
+for base in "$HOME/.codex/skills" "$HOME/.claude/skills"; do
+    if [ -d "$base" ]; then
+        mkdir -p "$base/navegador"
+        cp "$SKILL_SOURCE" "$base/navegador/SKILL.md"
+    fi
+done
+
 '@
-    $installer = $installer.Replace("__WRAPPER__", $tmpWrapperLinux)
+        $installer = $installer.Replace("__WRAPPER__", $tmpWrapperLinux)
+        $installer = $installer.Replace("__SKILL__", $tmpSkillLinux)
 
-    $tmpInstallerWin = Join-Path $env:TEMP "navegador-bashrc-install.sh"
-    [System.IO.File]::WriteAllText(
-        $tmpInstallerWin,
-        ($installer -replace "`r`n", "`n"),
-        (New-Object System.Text.UTF8Encoding($false))
-    )
-    $tmpInstallerLinux = Convert-WinPathToMnt -Path $tmpInstallerWin
+        $tmpInstallerWin = Join-Path $env:TEMP "navegador-bashrc-install.sh"
+        [System.IO.File]::WriteAllText(
+            $tmpInstallerWin,
+            ($installer -replace "`r`n", "`n"),
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+        $tmpInstallerLinux = Convert-WinPathToMnt -Path $tmpInstallerWin
 
-    try {
+        try {
+            foreach ($distro in $wslDistrosOk) {
+                wsl -d $distro -- bash "$tmpInstallerLinux"
+                if ($LASTEXITCODE -eq 0) {
+                    $report.wslDistros += $distro
+                    $skillTargets = (wsl -d $distro -- sh -lc 'for base in "$HOME/.codex/skills" "$HOME/.claude/skills"; do if [ -f "$base/navegador/SKILL.md" ]; then printf "%s\n" "$base/navegador/SKILL.md"; fi; done' 2>$null) -as [string]
+                    if ($skillTargets) {
+                        (($skillTargets -split "`r?`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ }) | ForEach-Object {
+                            $report.wslSkillTargets += "${distro}:$_"
+                        }
+                    }
+                }
+            }
+        } finally {
+            Remove-Item -Path $tmpSkillWin, $tmpWrapperWin, $tmpInstallerWin -ErrorAction SilentlyContinue
+        }
+
         foreach ($distro in $wslDistrosOk) {
-            wsl -d $distro -- bash "$tmpInstallerLinux"
-            if ($LASTEXITCODE -eq 0) {
-                $report.wslDistros += $distro
+            $commandOutput = (wsl -d $distro -- sh -lc "command -v navegador 2>/dev/null" 2>$null) -as [string]
+            $commandOutput = ($commandOutput -replace "\s", "")
+            if ([string]::IsNullOrWhiteSpace($commandOutput) -or $commandOutput -notmatch "/navegador$") {
+                Write-Warning "navegador nao ficou disponivel na distro '$distro'."
             }
         }
-    } finally {
-        Remove-Item -Path $tmpWrapperWin, $tmpInstallerWin -ErrorAction SilentlyContinue
-    }
-
-    foreach ($distro in $wslDistrosOk) {
-        $commandOutput = (wsl -d $distro -- sh -lc "command -v navegador 2>/dev/null" 2>$null) -as [string]
-        $commandOutput = ($commandOutput -replace "\s", "")
-        if ([string]::IsNullOrWhiteSpace($commandOutput) -or $commandOutput -notmatch "/navegador$") {
-            Write-Warning "navegador nao ficou disponivel na distro '$distro'."
-        }
-    }
 
         $report.wslStatus = "Integrado em: $($report.wslDistros -join ', ')"
     } else {
@@ -423,6 +446,10 @@ fi
     }
 } finally {
     Pop-Location
+}
+
+if ($report.windowsSkillTargets.Count -eq 0 -and $report.wslSkillTargets.Count -eq 0) {
+    Write-Warning "Nenhum diretorio global de skills do Codex ou Claude Code foi encontrado no Windows ou nas distros WSL integradas."
 }
 
 Write-Host ""
@@ -439,6 +466,12 @@ if ($report.windowsSkillTargets.Count -gt 0) {
     $report.windowsSkillTargets | ForEach-Object { Write-Host " - $_" }
 } else {
     Write-Host "Skills registradas no Windows: nenhuma"
+}
+if ($report.wslSkillTargets.Count -gt 0) {
+    Write-Host "Skills registradas no WSL:"
+    $report.wslSkillTargets | ForEach-Object { Write-Host " - $_" }
+} else {
+    Write-Host "Skills registradas no WSL: nenhuma"
 }
 Write-Host "WSL2: $($report.wslStatus)"
 Write-Host ""
