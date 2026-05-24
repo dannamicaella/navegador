@@ -1,6 +1,8 @@
 param(
     [string]$SkillSourcePath,
-    [string]$SkillUrl = "https://raw.githubusercontent.com/giovannefeitosa/navegador/main/skills/navegador/SKILL.md"
+    [string]$SkillUrl = "https://raw.githubusercontent.com/giovannefeitosa/navegador/main/skills/navegador/SKILL.md",
+    [string]$IconSourcePath,
+    [string]$IconUrl = "https://raw.githubusercontent.com/giovannefeitosa/navegador/main/navegador-logo.ico"
 )
 
 $ErrorActionPreference = "Stop"
@@ -84,6 +86,43 @@ function Resolve-SkillContent {
     }
 
     return $response.Content
+}
+
+function Install-IconFile {
+    param(
+        [string]$RequestedPath,
+        [string]$RequestedUrl,
+        [string]$DestinationPath
+    )
+
+    $localCandidates = @()
+    if ($RequestedPath) {
+        $localCandidates += $RequestedPath
+    }
+
+    $repoIconPath = Join-Path (Split-Path -Parent $PSScriptRoot) "navegador-logo.ico"
+    if (Test-Path $repoIconPath) {
+        $localCandidates += $repoIconPath
+    }
+
+    $destinationDir = Split-Path -Parent $DestinationPath
+    if ($destinationDir -and -not (Test-Path $destinationDir)) {
+        New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+    }
+
+    foreach ($candidate in $localCandidates | Select-Object -Unique) {
+        if ($candidate -and (Test-Path $candidate)) {
+            Copy-Item -Path $candidate -Destination $DestinationPath -Force
+            return $DestinationPath
+        }
+    }
+
+    Invoke-WebRequest -Uri $RequestedUrl -OutFile $DestinationPath -UseBasicParsing
+    if (-not (Test-Path $DestinationPath) -or (Get-Item $DestinationPath).Length -le 0) {
+        throw "Nao foi possivel obter o icone do Navegador em $RequestedUrl."
+    }
+
+    return $DestinationPath
 }
 
 function Install-SkillIfBaseExists {
@@ -185,15 +224,16 @@ function Install-NavegadorShortcuts {
     param(
         [string]$AgentBrowserExe,
         [string]$ChromePath,
+        [string]$IconSourcePath,
+        [string]$IconUrl,
         $Report
     )
 
     $shortcutName = "Navegador.lnk"
     $desktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) $shortcutName
-    $taskbarDir = Join-Path $env:APPDATA "Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
-    $taskbarShortcut = Join-Path $taskbarDir $shortcutName
     $arguments = Get-NavegadorShortcutArguments -ChromePath $ChromePath
-    $iconLocation = $AgentBrowserExe
+    $iconPath = Join-Path (Join-Path $env:USERPROFILE "Navegador") "navegador.ico"
+    $iconLocation = Install-IconFile -RequestedPath $IconSourcePath -RequestedUrl $IconUrl -DestinationPath $iconPath
     $description = "Abre o Navegador com o perfil persistente do Windows."
 
     Set-Shortcut `
@@ -206,18 +246,7 @@ function Install-NavegadorShortcuts {
 
     if (Test-Path $desktopShortcut) {
         $Report.desktopShortcutPath = $desktopShortcut
-    }
-
-    Set-Shortcut `
-        -ShortcutPath $taskbarShortcut `
-        -TargetPath $AgentBrowserExe `
-        -Arguments $arguments `
-        -WorkingDirectory $env:USERPROFILE `
-        -IconLocation $iconLocation `
-        -Description $description
-
-    if (Test-Path $taskbarShortcut) {
-        $Report.taskbarShortcutPath = $taskbarShortcut
+        $Report.shortcutIconPath = $iconPath
     }
 }
 
@@ -230,7 +259,7 @@ $report = [ordered]@{
     profileCreated       = $false
     executionPolicy      = $null
     desktopShortcutPath  = $null
-    taskbarShortcutPath  = $null
+    shortcutIconPath     = $null
     windowsSkillTargets  = @()
     wslSkillTargets      = @()
     wslDistros           = @()
@@ -548,8 +577,8 @@ if ($report.windowsSkillTargets.Count -eq 0 -and $report.wslSkillTargets.Count -
     Write-Warning "Nenhum diretorio global de skills do Codex ou Claude Code foi encontrado no Windows ou nas distros WSL integradas."
 }
 
-Write-Host "==> Criando atalhos no Windows"
-Install-NavegadorShortcuts -AgentBrowserExe $agentBrowserExe -ChromePath $chromeReal -Report $report
+Write-Host "==> Criando atalho na area de trabalho do Windows"
+Install-NavegadorShortcuts -AgentBrowserExe $agentBrowserExe -ChromePath $chromeReal -IconSourcePath $IconSourcePath -IconUrl $IconUrl -Report $report
 
 Write-Host ""
 Write-Host "=== Relatorio de instalacao - skill navegador ==="
@@ -561,7 +590,7 @@ Write-Host "PROFILE: $($report.profilePath)"
 Write-Host "PROFILE criado agora: $($report.profileCreated)"
 Write-Host "ExecutionPolicy: $($report.executionPolicy)"
 Write-Host "Atalho na area de trabalho: $(if ($report.desktopShortcutPath) { $report.desktopShortcutPath } else { 'nao criado' })"
-Write-Host "Atalho na taskbar: $(if ($report.taskbarShortcutPath) { $report.taskbarShortcutPath } else { 'nao criado' })"
+Write-Host "Icone do atalho: $(if ($report.shortcutIconPath) { $report.shortcutIconPath } else { 'nao instalado' })"
 if ($report.windowsSkillTargets.Count -gt 0) {
     Write-Host "Skills registradas no Windows:"
     $report.windowsSkillTargets | ForEach-Object { Write-Host " - $_" }

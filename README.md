@@ -10,6 +10,9 @@ A instalação cria um perfil persistente em `%USERPROFILE%\Navegador`. Logins, 
 - O Chrome e os dados do usuário ficam no Windows, não no WSL2.
 - Todas as automações usam o mesmo Google Chrome e o mesmo perfil: `%USERPROFILE%\Navegador`.
 - O instalador cria a função `navegador` no `$PROFILE` do PowerShell.
+- O instalador cria apenas um atalho `Navegador` na área de trabalho do Windows.
+- O instalador não cria, não fixa e não altera atalhos na taskbar.
+- O atalho da área de trabalho usa o ícone do projeto, salvo em `%USERPROFILE%\Navegador\navegador.ico`.
 - `agent-browser` é instalado globalmente no Windows com `npm install -g`.
 - `Node.js`, `npm`, `agent-browser` e Google Chrome podem ser instalados automaticamente quando `winget` estiver disponível.
 - A instalação sempre começa no PowerShell do Windows.
@@ -41,6 +44,8 @@ finally {
 ```
 
 Depois da instalacao, feche e abra novamente o Codex ou o Claude Code para carregar a skill global.
+
+Ao final, o instalador deixa um único atalho `Navegador` na área de trabalho do Windows, já com o ícone do projeto baixado do repositório público.
 
 > Peca para o seu agente instalar manualmente, veja [INSTALL_PROMPT.md](INSTALL_PROMPT.md). Esse caminho e referencia; o script acima e o caminho recomendado.
 
