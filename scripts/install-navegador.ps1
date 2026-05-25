@@ -63,6 +63,60 @@ function Get-RealChromePath {
     return $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
 }
 
+function Read-Utf8TextFile {
+    param(
+        [string]$Path
+    )
+
+    $reader = New-Object System.IO.StreamReader(
+        $Path,
+        (New-Object System.Text.UTF8Encoding($false, $true)),
+        $true
+    )
+
+    try {
+        return $reader.ReadToEnd()
+    } finally {
+        $reader.Dispose()
+    }
+}
+
+function Read-Utf8HttpResponse {
+    param(
+        $Response
+    )
+
+    $reader = New-Object System.IO.StreamReader(
+        $Response.RawContentStream,
+        (New-Object System.Text.UTF8Encoding($false, $true)),
+        $true
+    )
+
+    try {
+        return $reader.ReadToEnd()
+    } finally {
+        $reader.Dispose()
+    }
+}
+
+function Write-Utf8TextFile {
+    param(
+        [string]$Path,
+        [string]$Content
+    )
+
+    $parent = Split-Path -Parent $Path
+    if ($parent -and -not (Test-Path $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    [System.IO.File]::WriteAllText(
+        $Path,
+        $Content,
+        (New-Object System.Text.UTF8Encoding($false))
+    )
+}
+
 function Resolve-SkillContent {
     param(
         [string]$RequestedPath,
@@ -76,16 +130,17 @@ function Resolve-SkillContent {
 
     foreach ($candidate in $localCandidates) {
         if ($candidate -and (Test-Path $candidate)) {
-            return (Get-Content -Path $candidate -Raw)
+            return (Read-Utf8TextFile -Path $candidate)
         }
     }
 
     $response = Invoke-WebRequest -Uri $RequestedUrl -UseBasicParsing
-    if ($response.StatusCode -ne 200 -or [string]::IsNullOrWhiteSpace($response.Content)) {
+    $content = Read-Utf8HttpResponse -Response $response
+    if ($response.StatusCode -ne 200 -or [string]::IsNullOrWhiteSpace($content)) {
         throw "Nao foi possivel obter o arquivo SKILL.md em $RequestedUrl."
     }
 
-    return $response.Content
+    return $content
 }
 
 function Install-IconFile {
@@ -137,7 +192,7 @@ function Install-SkillIfBaseExists {
 
     $skillDir = Join-Path $BaseDir "navegador"
     New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
-    Set-Content -Path (Join-Path $skillDir "SKILL.md") -Value $SkillContent -Encoding UTF8
+    Write-Utf8TextFile -Path (Join-Path $skillDir "SKILL.md") -Content $SkillContent
     return $true
 }
 
@@ -484,19 +539,11 @@ fi
         $wslWrapper = $wslWrapper.Replace("__PROFILE_WIN__", $profileWin)
         $wslWrapper = $wslWrapper.Replace("__CHROME_WIN__", $chromeWin)
         $tmpSkillWin = Join-Path $env:TEMP "navegador-skill.md"
-        [System.IO.File]::WriteAllText(
-            $tmpSkillWin,
-            ($skillContent -replace "`r`n", "`n"),
-            (New-Object System.Text.UTF8Encoding($false))
-        )
+        Write-Utf8TextFile -Path $tmpSkillWin -Content ($skillContent -replace "`r`n", "`n")
         $tmpSkillLinux = Convert-WinPathToMnt -Path $tmpSkillWin
 
         $tmpWrapperWin = Join-Path $env:TEMP "navegador-wsl-wrapper.sh"
-        [System.IO.File]::WriteAllText(
-            $tmpWrapperWin,
-            ($wslWrapper -replace "`r`n", "`n"),
-            (New-Object System.Text.UTF8Encoding($false))
-        )
+        Write-Utf8TextFile -Path $tmpWrapperWin -Content ($wslWrapper -replace "`r`n", "`n")
 
         $tmpWrapperLinux = Convert-WinPathToMnt -Path $tmpWrapperWin
         $installer = @'
@@ -534,11 +581,7 @@ done
         $installer = $installer.Replace("__SKILL__", $tmpSkillLinux)
 
         $tmpInstallerWin = Join-Path $env:TEMP "navegador-bashrc-install.sh"
-        [System.IO.File]::WriteAllText(
-            $tmpInstallerWin,
-            ($installer -replace "`r`n", "`n"),
-            (New-Object System.Text.UTF8Encoding($false))
-        )
+        Write-Utf8TextFile -Path $tmpInstallerWin -Content ($installer -replace "`r`n", "`n")
         $tmpInstallerLinux = Convert-WinPathToMnt -Path $tmpInstallerWin
 
         try {
