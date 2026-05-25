@@ -123,11 +123,12 @@ function navegador {
     )
     `$chromeExe = `$chromePaths | Where-Object { Test-Path `$_ } | Select-Object -First 1
 
-    if (`$chromeExe) {
-        agent-browser --profile "`$env:USERPROFILE\Navegador" --headed --executable-path `$chromeExe --args "--disable-blink-features=AutomationControlled" @Argumentos
-    } else {
-        agent-browser --profile "`$env:USERPROFILE\Navegador" --headed --args "--disable-blink-features=AutomationControlled" @Argumentos
+    if (-not `$chromeExe) {
+        Write-Error "Chrome not found. Install Google Chrome or check its installation path."
+        return
     }
+
+    agent-browser --profile "`$env:USERPROFILE\Navegador" --headed --executable-path `$chromeExe @Argumentos 2>`$null
 }
 $endMarker
 "@
