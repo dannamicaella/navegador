@@ -14,7 +14,7 @@ O unico caminho suportado de instalacao e pelo PowerShell do Windows. Se houver 
 
 ## Reinicialização do ambiente
 
-Depois de instalar softwares ou alterar variáveis de ambiente, a sessão atual pode não enxergar os comandos novos. Tente recarregar o `$PROFILE` do Windows 11. Se isso não bastar, peça ao usuário para reiniciar o terminal ou o computador, explicar o motivo e voltar nesta conversa com "continuar".
+Depois de instalar softwares ou alterar variáveis de ambiente, a sessão atual pode não enxergar os comandos novos. Tente recarregar o `$PROFILE` do Windows. Se isso não bastar, peça ao usuário para reiniciar o terminal ou o computador, explicar o motivo e voltar nesta conversa com "continuar".
 
 Se o comando continuar indisponível após a reinicialização, confira se ele está no local esperado. Se ainda assim não funcionar, pare e explique que a reinicialização não resolveu.
 
@@ -47,7 +47,7 @@ Só peça para reiniciar o terminal se `node` ou `npm` continuarem indisponívei
 
 ## 2. Instalar agent-browser e Chrome
 
-Instale o `agent-browser` pelo npm do Windows 11:
+Instale o `agent-browser` pelo npm do Windows:
 
 ```powershell
 $agentBrowserExistente = Get-Command agent-browser,agent-browser.cmd,agent-browser.ps1 -ErrorAction SilentlyContinue | Select-Object -First 1

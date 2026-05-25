@@ -37,7 +37,7 @@ function Find-Command {
 function Ensure-Winget {
     $winget = Find-Command -Names @("winget.exe", "winget")
     if (-not $winget) {
-        throw "winget nao esta disponivel nesta maquina. Instale manualmente o Node.js LTS e o Google Chrome, ou rode este instalador em um Windows 11 com winget."
+        throw "winget nao esta disponivel nesta maquina. Instale manualmente o Node.js LTS e o Google Chrome, ou rode este instalador em uma maquina com winget disponivel."
     }
 
     return $winget
