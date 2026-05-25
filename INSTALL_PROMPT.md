@@ -105,6 +105,8 @@ if ($policy -in @('Restricted', 'Undefined', 'AllSigned')) {
 
 O bloco usa os marcadores `# >>> navegador >>>` e `# <<< navegador <<<`. Se o bloco já existir, substitua. Se não existir, adicione ao final. Isso mantém a instalação idempotente e facilita rollback.
 
+Importante: a função `navegador` não pode matar o `agent-browser` nem abrir um "fallback" em outra janela só porque `open`, `goto` ou `navigate` demoraram alguns segundos. O comportamento correto é reutilizar a sessão existente e aguardar a conclusão normal do comando.
+
 ```powershell
 $beginMarker = '# >>> navegador >>>'
 $endMarker   = '# <<< navegador <<<'

@@ -10,6 +10,7 @@ A instalação cria um perfil persistente em `%USERPROFILE%\Navegador`. Logins, 
 - O Chrome e os dados do usuário ficam no Windows, não no WSL2.
 - Todas as automações usam o mesmo Google Chrome e o mesmo perfil: `%USERPROFILE%\Navegador`.
 - O instalador cria a função `navegador` no `$PROFILE` do PowerShell.
+- A função `navegador` não deve fechar nem recriar a sessão aberta só porque um comando `open`, `goto` ou `navigate` demorou para responder.
 - O instalador cria apenas um atalho `Navegador` na área de trabalho do Windows.
 - O instalador não cria, não fixa e não altera atalhos na taskbar.
 - O atalho da área de trabalho usa o ícone do projeto, salvo em `%USERPROFILE%\Navegador\navegador.ico`.

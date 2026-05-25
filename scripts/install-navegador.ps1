@@ -211,6 +211,16 @@ function Stop-AgentBrowserDaemon {
     }
 }
 
+function Stop-AgentBrowserProcesses {
+    $processes = @(Get-Process -Name "agent-browser-win32-x64" -ErrorAction SilentlyContinue)
+    foreach ($process in $processes) {
+        try {
+            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+        } catch {
+        }
+    }
+}
+
 function Convert-WinPathToMnt {
     param(
         [string]$Path
@@ -348,6 +358,7 @@ Write-Host "==> Instalando/atualizando agent-browser"
 if ($agentBrowserBefore = Find-Command -Names @("agent-browser", "agent-browser.cmd", "agent-browser.ps1")) {
     Stop-AgentBrowserDaemon -Command $agentBrowserBefore
 }
+Stop-AgentBrowserProcesses
 & $npmCommand.Source install -g agent-browser
 Refresh-ProcessPath
 if ((Test-Path (Join-Path $env:APPDATA "npm")) -and $env:Path -notlike "*$env:APPDATA\npm*") {
@@ -412,6 +423,22 @@ function navegador {
         [string[]] `$Argumentos
     )
 
+    function ConvertTo-NavegadorCliArgument {
+        param(
+            [string]`$Value
+        )
+
+        if (`$null -eq `$Value) {
+            return '""'
+        }
+
+        if (`$Value -match '[\s"]') {
+            return '"' + (`$Value -replace '"', '\"') + '"'
+        }
+
+        return `$Value
+    }
+
     `$chromePaths = @(
         "`$env:PROGRAMFILES\Google\Chrome\Application\chrome.exe",
         "`${env:PROGRAMFILES(x86)}\Google\Chrome\Application\chrome.exe",
@@ -424,7 +451,53 @@ function navegador {
         return
     }
 
-    agent-browser --profile "`$env:USERPROFILE\Navegador" --headed --executable-path `$chromeExe @Argumentos 2>`$null
+    `$agentBrowserExe = Join-Path "`$env:APPDATA" "npm\node_modules\agent-browser\bin\agent-browser-win32-x64.exe"
+    if (-not (Test-Path `$agentBrowserExe)) {
+        Write-Error "agent-browser-win32-x64.exe not found. Reinstale o Navegador para restaurar a CLI."
+        return
+    }
+
+    `$stdoutPath = Join-Path "`$env:TEMP" ("agent-browser-" + [guid]::NewGuid().ToString() + ".out")
+    `$stderrPath = Join-Path "`$env:TEMP" ("agent-browser-" + [guid]::NewGuid().ToString() + ".err")
+
+    try {
+        `$agentBrowserArgs = @(
+            '--profile'
+            "`$env:USERPROFILE\Navegador"
+            '--headed'
+            '--executable-path'
+            `$chromeExe
+            '--args'
+            '--disable-blink-features=AutomationControlled'
+        ) + `$Argumentos
+
+        `$agentBrowserArgumentLine = ((`$agentBrowserArgs | ForEach-Object { ConvertTo-NavegadorCliArgument -Value `$_ }) -join ' ')
+        `$process = Start-Process -FilePath `$agentBrowserExe -ArgumentList `$agentBrowserArgumentLine -RedirectStandardOutput `$stdoutPath -RedirectStandardError `$stderrPath -PassThru -WindowStyle Hidden
+
+        if (-not `$process.HasExited) {
+            `$process.WaitForExit()
+        }
+
+        `$stdout = if (Test-Path `$stdoutPath) { Get-Content -Path `$stdoutPath -Raw } else { "" }
+        `$stderr = if (Test-Path `$stderrPath) { Get-Content -Path `$stderrPath -Raw } else { "" }
+        `$filteredStderr = ((`$stderr -split "`r?`n") | Where-Object {
+            `$_ -and `$_ -notmatch 'ignored: daemon already running'
+        }) -join [Environment]::NewLine
+
+        if (-not [string]::IsNullOrWhiteSpace(`$stdout)) {
+            [Console]::Out.Write(`$stdout)
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace(`$filteredStderr)) {
+            [Console]::Error.WriteLine(`$filteredStderr)
+        }
+
+        if (`$process.ExitCode -ne 0) {
+            Write-Error ("agent-browser falhou com codigo {0}." -f `$process.ExitCode)
+        }
+    } finally {
+        Remove-Item -LiteralPath `$stdoutPath, `$stderrPath -Force -ErrorAction SilentlyContinue
+    }
 }
 $endMarker
 "@
