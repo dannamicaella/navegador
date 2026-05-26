@@ -392,9 +392,7 @@ if (-not $chromeReal) {
 if ($chromeReal) {
     $report.chromeUsed = $chromeReal
 } else {
-    Write-Warning "Chrome real nao encontrado. Instalando Chrome for Testing como fallback..."
-    & $agentBrowserCommand.Source install
-    $report.chromeUsed = "Chrome for Testing (fallback via agent-browser install)"
+    throw "Google Chrome real nao encontrado. Instale o Google Chrome e execute o instalador novamente."
 }
 
 Write-Host "==> Atualizando funcao navegador no PowerShell"
@@ -447,14 +445,12 @@ function navegador {
     `$chromeExe = `$chromePaths | Where-Object { Test-Path `$_ } | Select-Object -First 1
 
     if (-not `$chromeExe) {
-        Write-Error "Chrome not found. Install Google Chrome or check its installation path."
-        return
+        throw "Chrome not found. Install Google Chrome or check its installation path."
     }
 
     `$agentBrowserExe = Join-Path "`$env:APPDATA" "npm\node_modules\agent-browser\bin\agent-browser-win32-x64.exe"
     if (-not (Test-Path `$agentBrowserExe)) {
-        Write-Error "agent-browser-win32-x64.exe not found. Reinstale o Navegador para restaurar a CLI."
-        return
+        throw "agent-browser-win32-x64.exe not found. Reinstale o Navegador para restaurar a CLI."
     }
 
     `$stdoutPath = Join-Path "`$env:TEMP" ("agent-browser-" + [guid]::NewGuid().ToString() + ".out")
@@ -474,8 +470,13 @@ function navegador {
         `$agentBrowserArgumentLine = ((`$agentBrowserArgs | ForEach-Object { ConvertTo-NavegadorCliArgument -Value `$_ }) -join ' ')
         `$process = Start-Process -FilePath `$agentBrowserExe -ArgumentList `$agentBrowserArgumentLine -RedirectStandardOutput `$stdoutPath -RedirectStandardError `$stderrPath -PassThru -WindowStyle Hidden
 
-        if (-not `$process.HasExited) {
-            `$process.WaitForExit()
+        `$timeoutSeconds = 30
+        if (-not `$process.WaitForExit(`$timeoutSeconds * 1000)) {
+            try {
+                Stop-Process -Id `$process.Id -Force -ErrorAction SilentlyContinue
+            } catch {
+            }
+            throw ("agent-browser nao respondeu em {0} segundos. O comando foi interrompido sem abrir navegador alternativo." -f `$timeoutSeconds)
         }
 
         `$stdout = if (Test-Path `$stdoutPath) { Get-Content -Path `$stdoutPath -Raw } else { "" }
@@ -492,8 +493,15 @@ function navegador {
             [Console]::Error.WriteLine(`$filteredStderr)
         }
 
-        if (`$process.ExitCode -ne 0) {
-            Write-Error ("agent-browser falhou com codigo {0}." -f `$process.ExitCode)
+        `$exitCode = $null
+        try {
+            `$process.Refresh()
+            `$exitCode = `$process.ExitCode
+        } catch {
+        }
+
+        if (`$null -ne `$exitCode -and `$exitCode -ne 0) {
+            throw ("agent-browser falhou com codigo {0}." -f `$exitCode)
         }
     } finally {
         Remove-Item -LiteralPath `$stdoutPath, `$stderrPath -Force -ErrorAction SilentlyContinue
