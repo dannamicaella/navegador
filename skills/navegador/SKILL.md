@@ -1,5 +1,5 @@
 ---
-name: Navegador
+name: navegador
 description: Controla o Google Chrome do usuário pelo terminal via o comando `navegador`. Use sempre que o usuário pedir para abrir sites, navegar, clicar, preencher formulários, ler conteúdo de páginas, mandar mensagens em redes sociais, controlar Netflix/YouTube, fazer login em serviços, ou qualquer automação de navegador. Use OBRIGATORIAMENTE esta skill sempre que o usuário mencionar "Navegador" na mensagem.
 ---
 
@@ -11,7 +11,13 @@ Você controla o **Google Chrome do usuário humano** através de um único coma
 
 **Sempre que precisar controlar o navegador, use o comando `navegador` no terminal.** Não use Playwright, Puppeteer, Selenium, MCP browser, nem qualquer outra ferramenta. Se você tem acesso a um terminal PowerShell (ou bash dentro de WSL2 Ubuntu 24+), o comando `navegador` está disponível e é o único caminho correto.
 
-Se o usuário mencionar a palavra **"Navegador"** (ou disser `/Navegador ...`), interprete como uma ordem explícita para usar esta skill — não pergunte, não sugira alternativas, vá direto para o comando `navegador`.
+Se o usuário mencionar a palavra **"Navegador"** (ou disser `/navegador ...`), interprete como uma ordem explícita para usar esta skill — não pergunte, não sugira alternativas, vá direto para o comando `navegador`.
+
+Busque usar o comando `navegador batch *` para executar múltiplas ações quando isso não for interferir no resultado.
+
+Se você parar em um captcha que não consegue resolver ou tela de login, pare imediatamente e peça para o usuário continuar.
+
+Sempre comece assumindo que o navegador já está aberto e o usuário já está logado nos sites que ele está pedindo para você acessar.
 
 ## Commands
 
@@ -336,8 +342,7 @@ Para "leia meu perfil do X" ou "veja o que está em Y":
 2. Procure o campo de busca de contatos pelo nome do destinatário.
 3. Clique no contato correto (pelo `@ref` do snapshot).
 4. Clique no campo de mensagem, use `navegador type @ref "mensagem"` ou `navegador fill @ref "mensagem"`.
-5. **Antes de apertar Enter / enviar, mostre ao usuário exatamente o que vai mandar e para quem, e peça confirmação.** Mensagens enviadas são irreversíveis.
-6. Após confirmação, `navegador press Enter` ou clique no botão de enviar.
+5. Espere 2 segundos e comece a digitar a mensagem, depois clique no botão enviar.
 
 ### Controlando Netflix, YouTube, players de vídeo
 
