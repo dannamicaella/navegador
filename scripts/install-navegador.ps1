@@ -37,7 +37,7 @@ function Find-Command {
 function Ensure-Winget {
     $winget = Find-Command -Names @("winget.exe", "winget")
     if (-not $winget) {
-        throw "winget nao esta disponivel nesta maquina. Instale manualmente o Node.js LTS e o Google Chrome, ou rode este instalador em um Windows 11 com winget."
+        throw "winget nao esta disponivel nesta maquina. Instale manualmente o Node.js LTS e o Google Chrome, ou rode este instalador em uma maquina com winget disponivel."
     }
 
     return $winget
@@ -211,6 +211,16 @@ function Stop-AgentBrowserDaemon {
     }
 }
 
+function Stop-AgentBrowserProcesses {
+    $processes = @(Get-Process -Name "agent-browser-win32-x64" -ErrorAction SilentlyContinue)
+    foreach ($process in $processes) {
+        try {
+            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+        } catch {
+        }
+    }
+}
+
 function Convert-WinPathToMnt {
     param(
         [string]$Path
@@ -348,6 +358,7 @@ Write-Host "==> Instalando/atualizando agent-browser"
 if ($agentBrowserBefore = Find-Command -Names @("agent-browser", "agent-browser.cmd", "agent-browser.ps1")) {
     Stop-AgentBrowserDaemon -Command $agentBrowserBefore
 }
+Stop-AgentBrowserProcesses
 & $npmCommand.Source install -g agent-browser
 Refresh-ProcessPath
 if ((Test-Path (Join-Path $env:APPDATA "npm")) -and $env:Path -notlike "*$env:APPDATA\npm*") {
@@ -381,9 +392,7 @@ if (-not $chromeReal) {
 if ($chromeReal) {
     $report.chromeUsed = $chromeReal
 } else {
-    Write-Warning "Chrome real nao encontrado. Instalando Chrome for Testing como fallback..."
-    & $agentBrowserCommand.Source install
-    $report.chromeUsed = "Chrome for Testing (fallback via agent-browser install)"
+    throw "Google Chrome real nao encontrado. Instale o Google Chrome e execute o instalador novamente."
 }
 
 Write-Host "==> Atualizando funcao navegador no PowerShell"
@@ -412,6 +421,22 @@ function navegador {
         [string[]] `$Argumentos
     )
 
+    function ConvertTo-NavegadorCliArgument {
+        param(
+            [string]`$Value
+        )
+
+        if (`$null -eq `$Value) {
+            return '""'
+        }
+
+        if (`$Value -match '[\s"]') {
+            return '"' + (`$Value -replace '"', '\"') + '"'
+        }
+
+        return `$Value
+    }
+
     `$chromePaths = @(
         "`$env:PROGRAMFILES\Google\Chrome\Application\chrome.exe",
         "`${env:PROGRAMFILES(x86)}\Google\Chrome\Application\chrome.exe",
@@ -420,11 +445,67 @@ function navegador {
     `$chromeExe = `$chromePaths | Where-Object { Test-Path `$_ } | Select-Object -First 1
 
     if (-not `$chromeExe) {
-        Write-Error "Chrome not found. Install Google Chrome or check its installation path."
-        return
+        throw "Chrome not found. Install Google Chrome or check its installation path."
     }
 
-    agent-browser --profile "`$env:USERPROFILE\Navegador" --headed --executable-path `$chromeExe @Argumentos 2>`$null
+    `$agentBrowserExe = Join-Path "`$env:APPDATA" "npm\node_modules\agent-browser\bin\agent-browser-win32-x64.exe"
+    if (-not (Test-Path `$agentBrowserExe)) {
+        throw "agent-browser-win32-x64.exe not found. Reinstale o Navegador para restaurar a CLI."
+    }
+
+    `$stdoutPath = Join-Path "`$env:TEMP" ("agent-browser-" + [guid]::NewGuid().ToString() + ".out")
+    `$stderrPath = Join-Path "`$env:TEMP" ("agent-browser-" + [guid]::NewGuid().ToString() + ".err")
+
+    try {
+        `$agentBrowserArgs = @(
+            '--profile'
+            "`$env:USERPROFILE\Navegador"
+            '--headed'
+            '--executable-path'
+            `$chromeExe
+            '--args'
+            '--disable-blink-features=AutomationControlled'
+        ) + `$Argumentos
+
+        `$agentBrowserArgumentLine = ((`$agentBrowserArgs | ForEach-Object { ConvertTo-NavegadorCliArgument -Value `$_ }) -join ' ')
+        `$process = Start-Process -FilePath `$agentBrowserExe -ArgumentList `$agentBrowserArgumentLine -RedirectStandardOutput `$stdoutPath -RedirectStandardError `$stderrPath -PassThru -WindowStyle Hidden
+
+        `$timeoutSeconds = 30
+        if (-not `$process.WaitForExit(`$timeoutSeconds * 1000)) {
+            try {
+                Stop-Process -Id `$process.Id -Force -ErrorAction SilentlyContinue
+            } catch {
+            }
+            throw ("agent-browser nao respondeu em {0} segundos. O comando foi interrompido sem abrir navegador alternativo." -f `$timeoutSeconds)
+        }
+
+        `$stdout = if (Test-Path `$stdoutPath) { Get-Content -Path `$stdoutPath -Raw } else { "" }
+        `$stderr = if (Test-Path `$stderrPath) { Get-Content -Path `$stderrPath -Raw } else { "" }
+        `$filteredStderr = ((`$stderr -split "`r?`n") | Where-Object {
+            `$_ -and `$_ -notmatch 'ignored: daemon already running'
+        }) -join [Environment]::NewLine
+
+        if (-not [string]::IsNullOrWhiteSpace(`$stdout)) {
+            [Console]::Out.Write(`$stdout)
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace(`$filteredStderr)) {
+            [Console]::Error.WriteLine(`$filteredStderr)
+        }
+
+        `$exitCode = $null
+        try {
+            `$process.Refresh()
+            `$exitCode = `$process.ExitCode
+        } catch {
+        }
+
+        if (`$null -ne `$exitCode -and `$exitCode -ne 0) {
+            throw ("agent-browser falhou com codigo {0}." -f `$exitCode)
+        }
+    } finally {
+        Remove-Item -LiteralPath `$stdoutPath, `$stderrPath -Force -ErrorAction SilentlyContinue
+    }
 }
 $endMarker
 "@

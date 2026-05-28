@@ -14,7 +14,7 @@ O unico caminho suportado de instalacao e pelo PowerShell do Windows. Se houver 
 
 ## Reinicialização do ambiente
 
-Depois de instalar softwares ou alterar variáveis de ambiente, a sessão atual pode não enxergar os comandos novos. Tente recarregar o `$PROFILE` do Windows 11. Se isso não bastar, peça ao usuário para reiniciar o terminal ou o computador, explicar o motivo e voltar nesta conversa com "continuar".
+Depois de instalar softwares ou alterar variáveis de ambiente, a sessão atual pode não enxergar os comandos novos. Tente recarregar o `$PROFILE` do Windows. Se isso não bastar, peça ao usuário para reiniciar o terminal ou o computador, explicar o motivo e voltar nesta conversa com "continuar".
 
 Se o comando continuar indisponível após a reinicialização, confira se ele está no local esperado. Se ainda assim não funcionar, pare e explique que a reinicialização não resolveu.
 
@@ -47,7 +47,7 @@ Só peça para reiniciar o terminal se `node` ou `npm` continuarem indisponívei
 
 ## 2. Instalar agent-browser e Chrome
 
-Instale o `agent-browser` pelo npm do Windows 11:
+Instale o `agent-browser` pelo npm do Windows:
 
 ```powershell
 $agentBrowserExistente = Get-Command agent-browser,agent-browser.cmd,agent-browser.ps1 -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -57,7 +57,7 @@ if ($agentBrowserExistente) {
 npm install -g agent-browser
 ```
 
-Verifique se o Google Chrome real já está instalado. Ele é preferível ao Chrome for Testing, porque o Google confia nele para login.
+Verifique se o Google Chrome real já está instalado. O Navegador não usa navegador alternativo: se o Chrome real não estiver disponível e não puder ser instalado, pare com erro.
 
 ```powershell
 $chromePaths = @(
@@ -73,13 +73,12 @@ if ($chromeReal) {
     winget install --id Google.Chrome --exact --accept-package-agreements --accept-source-agreements --silent
     $chromeReal = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $chromeReal) {
-        Write-Host "Nao foi possivel instalar o Chrome real automaticamente. Baixando Chrome for Testing como fallback..."
-        agent-browser install
+        throw "Nao foi possivel instalar o Chrome real automaticamente. Instale o Google Chrome e execute a instalacao novamente."
     }
 }
 ```
 
-O Chrome for Testing, baixado por `agent-browser install`, pode ser tratado pelo Google como navegador inseguro. Sempre tente usar o Chrome real antes do fallback.
+Nao use `agent-browser install` para baixar Chrome for Testing. O comportamento correto e falhar e pedir a instalacao do Google Chrome real.
 
 ## 3. Criar a função navegador no PowerShell
 
@@ -105,6 +104,8 @@ if ($policy -in @('Restricted', 'Undefined', 'AllSigned')) {
 
 O bloco usa os marcadores `# >>> navegador >>>` e `# <<< navegador <<<`. Se o bloco já existir, substitua. Se não existir, adicione ao final. Isso mantém a instalação idempotente e facilita rollback.
 
+Importante: a função `navegador` não pode abrir outro navegador ou outra janela alternativa quando `open`, `goto` ou `navigate` falharem ou demorarem demais. O comportamento correto é reutilizar a sessão existente; se o comando não responder em tempo razoável, interromper o processo e falhar explicitamente.
+
 ```powershell
 $beginMarker = '# >>> navegador >>>'
 $endMarker   = '# <<< navegador <<<'
@@ -124,8 +125,7 @@ function navegador {
     `$chromeExe = `$chromePaths | Where-Object { Test-Path `$_ } | Select-Object -First 1
 
     if (-not `$chromeExe) {
-        Write-Error "Chrome not found. Install Google Chrome or check its installation path."
-        return
+        throw "Chrome not found. Install Google Chrome or check its installation path."
     }
 
     agent-browser --profile "`$env:USERPROFILE\Navegador" --headed --executable-path `$chromeExe @Argumentos 2>`$null
@@ -552,7 +552,7 @@ Softwares instalados:
 - Node.js: <versão obtida em `node --version`>
 - npm: <versão obtida em `npm --version`>
 - agent-browser: <versão obtida em `agent-browser --version` ou `npm list -g agent-browser`>
-- Chrome usado: <caminho do Chrome real detectado, ex: C:\Program Files\Google\Chrome\Application\chrome.exe | Chrome for Testing (fallback, instalado via `agent-browser install`)>
+- Chrome usado: <caminho do Chrome real detectado, ex: C:\Program Files\Google\Chrome\Application\chrome.exe>
 
 Arquivos criados:
 - <caminho do $PROFILE, se foi criado neste passo>

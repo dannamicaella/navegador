@@ -6,10 +6,12 @@ A instalação cria um perfil persistente em `%USERPROFILE%\Navegador`. Logins, 
 
 ## Decisões do projeto
 
-- Funciona apenas no Windows 11.
+- Funciona no Windows 10 e no Windows 11.
 - O Chrome e os dados do usuário ficam no Windows, não no WSL2.
 - Todas as automações usam o mesmo Google Chrome e o mesmo perfil: `%USERPROFILE%\Navegador`.
 - O instalador cria a função `navegador` no `$PROFILE` do PowerShell.
+- A função `navegador` não deve fechar nem recriar a sessão aberta só porque um comando `open`, `goto` ou `navigate` demorou para responder.
+- O projeto não usa navegador alternativo: se o Google Chrome real não estiver disponível ou um comando não responder, deve falhar explicitamente.
 - O instalador cria apenas um atalho `Navegador` na área de trabalho do Windows.
 - O instalador não cria, não fixa e não altera atalhos na taskbar.
 - O atalho da área de trabalho usa o ícone do projeto, salvo em `%USERPROFILE%\Navegador\navegador.ico`.
@@ -22,7 +24,8 @@ A instalação cria um perfil persistente em `%USERPROFILE%\Navegador`. Logins, 
 
 ## Requisitos
 
-- Windows 11.
+- Windows 10 ou Windows 11.
+- `winget` e opcional, mas quando estiver indisponivel talvez seja necessario instalar Node.js LTS e Google Chrome manualmente.
 - PowerShell disponível.
 - Codex ou Claude Code instalado.
 - Plano pago ativo do Codex ou Claude Code.
